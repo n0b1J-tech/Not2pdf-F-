@@ -81,4 +81,4 @@ This project currently ships as a **text-only** PDF generator. Image generation 
 
 ---
 
-*Built with the help of Claude (Anthropic). Project started September 9, 2026.*
+*Built with the help of Claude (Anthropic).*
