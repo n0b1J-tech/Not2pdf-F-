@@ -1,0 +1,358 @@
+{
+  "name": "text file to pdf/img\\F",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Notes to PDF",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Upload your notes",
+              "fieldType": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6e7f9a2f-1592-47f3-a156-fd0f3f99fb9c",
+      "name": "On form submission",
+      "webhookId": "7b27ed0e-f70d-44d5-994d-73af06b04af4"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "Upload_your_notes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "f12452cb-b513-4b89-842e-f45b234ce40b",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"openai/gpt-oss-20b\", max_tokens: 3000, messages: [ { role: \"user\", content: \"Reorganize the following class notes into clear sections with headings. Merge or remove any repeated/duplicate points so each concept appears only once. Do not add any new concepts, facts, or information not already present. For each existing concept, add: a real-life application or example, the underlying logic/reasoning behind it, and a practical tip for using it effectively. At the end, add a Key Takeaways section summarizing only what's covered above. Respond using EXACTLY this plain text format with no extra commentary: ===NOTES=== (full restructured notes in markdown here) ===IMAGES=== (list ONLY concepts genuinely hard to visualize, max 3, one per line as: Concept: name | Prompt: image description - write nothing here if none qualify) ===END=== Notes: \" + $json.data } ] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "6f912f5d-4afe-4cd1-90e5-ef89f7bcfb37",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hj7MxlnCXnkHIHzj",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\nconst imagesMatch = raw.match(/===IMAGES===([\\s\\S]*?)(===END===|$)/);\nconst imagesBlock = imagesMatch ? imagesMatch[1].trim() : '';\nconst lines = imagesBlock.split('\\n').filter(l => l.trim().length > 0 && !/^none$/i.test(l.trim()));\n\nif (lines.length === 0) {\n  return [{ json: { prompt: null, skip: true } }];\n}\n\nreturn lines.map(line => {\n  const m = line.match(/Prompt:\\s*(.+)/i);\n  return { json: { prompt: m ? m[1].trim() : line.trim(), skip: false } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "a0c74b65-a160-4e29-af79-4d94786a0b05",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://image.pollinations.ai/prompt/' + encodeURIComponent($json.prompt) + '?width=768&height=512' }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1296,
+        16
+      ],
+      "id": "e834403b-f0fa-4340-9046-48c661097c5f",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        896,
+        0
+      ],
+      "id": "5987035a-9858-40d2-af9d-6eb1e4b1ce3c",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 16
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1088,
+        16
+      ],
+      "id": "c4420e3b-b9f8-44ae-b5ff-25b0868c6c06",
+      "name": "Wait",
+      "webhookId": "d8d27b07-7d6d-44d6-9969-332acec40839"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $node[\"HTTP Request\"].json.choices[0].message.content;\nconst notesMatch = raw.match(/===NOTES===([\\s\\S]*?)(===IMAGES===|$)/);\nconst structuredText = notesMatch ? notesMatch[1].trim() : raw.replace(/===[A-Z]+===/g, '').trim();\n\nconst imagesMatch = raw.match(/===IMAGES===([\\s\\S]*?)(===END===|$)/);\nconst imagesBlock = imagesMatch ? imagesMatch[1].trim() : '';\nconst lines = imagesBlock.split('\\n').filter(l => l.trim().length > 0 && !/^none$/i.test(l.trim()));\nconst imageConcepts = lines.map(line => {\n  const m = line.match(/Concept:\\s*(.+?)\\s*\\|/i);\n  return m ? m[1].trim() : '';\n});\n\nfunction slugify(text) {\n  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction markdownToHtml(md) {\n  let html = md;\n  html = html.replace(/^(#{1,6}) (.+)$/gm, (m, hashes, t) => {\n    const level = Math.min(hashes.length, 6);\n    return `<h${level} id=\"${slugify(t)}\">${t}</h${level}>`;\n  });\n  html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');\n  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');\n  html = html.replace(/(^|\\n)- (.+)/g, '$1<li>$2</li>');\n  html = html.replace(/(<li>.*<\\/li>\\n?)+/gs, m => `<ul>${m}</ul>`);\n  html = html.split('\\n').map(line => {\n    const t = line.trim();\n    if (!t) return '';\n    if (/^<h[1-6]|^<ul|^<li/.test(t)) return t;\n    return `<p>${t}</p>`;\n  }).join('\\n');\n  return html;\n}\n\nconst html = markdownToHtml(structuredText);\nconsole.log('CONVERTED HTML SAMPLE:', html.substring(0, 300));\n\nconst binary = {};\n$input.all().forEach((item, i) => {\n  binary['image' + i] = item.binary.data;\n});\nreturn [{ json: { html, imageConcepts }, binary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -160
+      ],
+      "id": "ece00aff-76fd-4f9d-97f7-edc4de45cf52",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst itemIndex = 0;\n\nconst html = item.json.html || '';\nconst concepts = item.json.imageConcepts || [];\nconst binary = item.binary || {};\nconst binaryKeys = Object.keys(binary);\n\nfunction slugify(text) {\n  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nconsole.log('CONCEPTS:', concepts);\nconsole.log('HEADING IDS FOUND:', [...html.matchAll(/id=\"([^\"]+)\"/g)].map(m => m[1]));\n\nlet finalHtml = html;\nlet leftoverImages = '';\n\nfor (let i = 0; i < binaryKeys.length; i++) {\n  const key = binaryKeys[i];\n  const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, key);\n  const imgData = buffer.toString('base64');\n  const mimeType = binary[key]?.mimeType || 'image/jpeg';\n  const imgTag = `<img src=\"data:${mimeType};base64,${imgData}\"/>`;\n\n  const concept = concepts[i];\n  let placed = false;\n\n  if (concept) {\n    const slug = slugify(concept);\n    const headingRegex = new RegExp(`(<h[1-6][^>]*id=\"${slug}\"[^>]*>.*?<\\\\/h[1-6]>)`, 'i');\n    if (headingRegex.test(finalHtml)) {\n      finalHtml = finalHtml.replace(headingRegex, `$1${imgTag}`);\n      placed = true;\n    }\n  }\n\n  if (!placed) {\n    leftoverImages += imgTag;\n  }\n}\n\nconst fullHtml = `<html><head><style>body{font-family:Georgia,serif;background:#fdfaf5;color:#3a3a3a;padding:40px;line-height:1.6;} h1,h2,h3{color:#6b8e7f;} img{max-width:100%;border-radius:8px;margin:16px 0;box-shadow:0 2px 8px rgba(0,0,0,0.1);}</style></head><body>${finalHtml}${leftoverImages}</body></html>`;\n\nreturn [{ json: { fullHtml } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -160
+      ],
+      "id": "9275a7e9-0b84-411c-92ce-0cc581abad79",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const buffer = Buffer.from($json.fullHtml, 'utf-8'); const binaryData = await this.helpers.prepareBinaryData(buffer, 'index.html', 'text/html'); return [{ json: {}, binary: { data: binaryData } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -160
+      ],
+      "id": "841366dc-6fda-49d5-aaaa-1ec53c6ae8bf",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        -160
+      ],
+      "id": "35fcecea-4fbe-4124-a136-af5bdb775bfc",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/files/output/notes-{{$now.toMillis()}}.pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        1088,
+        -160
+      ],
+      "id": "d0c66544-09a6-4d3c-91a5-ae3b77db2652",
+      "name": "Read/Write Files from Disk"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cb91cc8c-984a-417b-9e7f-f6d60461d99b",
+  "meta": {
+    "instanceId": "78dae5061e6bc8a5b4ca451e4c936e34369a99a768f5dd26a6e675c8676e8e09"
+  },
+  "nodeGroups": [],
+  "id": "yIbzmC0NikvlR8sl",
+  "tags": []
+}
